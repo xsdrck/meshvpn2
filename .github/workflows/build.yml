@@ -1,0 +1,77 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact-name: meshvpn-linux-amd64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact-name: meshvpn-windows-amd64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact-name: meshvpn-macos-amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare release files
+        shell: bash
+        run: |
+          mkdir -p release
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp target/${{ matrix.target }}/release/meshvpn.exe release/
+            cp README.md release/
+            cd release && zip -r ../meshvpn-windows-amd64.zip .
+          else
+            cp target/${{ matrix.target }}/release/meshvpn release/
+            cp README.md release/
+            cd release && tar -czf ../meshvpn-${{ matrix.os }}-amd64.tar.gz .
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: meshvpn-*
+
+  create-release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          
+      - name: Display files
+        run: ls -la artifacts/
+      
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.{zip,tar.gz}
+          draft: false
+          prerelease: false
